@@ -1,0 +1,363 @@
+# Aluna Memory - GitHub Copilot Instructions
+
+## Project Identity
+**Name:** Aluna Memory  
+**Purpose:** Production-grade memory system for AI agents  
+**Architecture:** mem0 framework + Open Memory MCP server  
+**Owner:** Rob "The Sounds Guy" Barenbrug (@soundsguyza)  
+**Standard:** 150% - Production ready only
+
+---
+
+## Core Architecture
+
+### System Components
+```
+CogniVault (data processor)
+    ↓
+Aluna Memory (mem0 core - container)
+    ↓
+Open Memory (MCP server - subdirectory)
+    ↓
+Mene Portal (user interface)
+```
+
+### Technology Stack
+- **Backend:** Python 3.10+, mem0 library
+- **Interface:** Gradio (NO FastAPI - removed Jan 4, 2026)
+- **MCP Server:** TypeScript/JavaScript in `/openmemory/` subdirectory
+- **Database:** SQLite + Vector search
+- **Storage:** Hot (RAM) + Cold (gzip archive)
+
+---
+
+## Memory Architecture
+
+### Memory Tiers
+1. **HOT (0-90 days)**
+   - Last 500 memories per user
+   - In-memory (RAM)
+   - Instant retrieval
+   - LRU eviction policy
+
+2. **WARM (90-365 days)**
+   - Active but less frequent
+   - SQLite storage
+   - Fast retrieval
+
+3. **COLD ACTIVE (365-730 days / 24 months)**
+   - Archived, auto-flagged for review
+   - Gzip compressed in `/archive/`
+   - Deep search on demand
+
+4. **COLD LEGACY (730-1095 days / 36 months)**
+   - Legacy preservation tier
+   - Auto-tagged: bonny, hazen, children, research, family
+   - Extended retention for critical memories
+
+### Retrieval Strategy
+```python
+# Two-tier search
+1. memory.search(hot_tier)  # Fast path
+2. if not found:
+       archive.deep_search(cold_tier)  # Fallback
+```
+
+---
+
+## API Configuration
+
+### Required Environment Variables
+```bash
+GEMINI_API_KEY=<google_gemini_key>     # Embeddings
+GROQ_API_KEY=<groq_inference_key>      # Fast LLM
+NOVITA_API_KEY=<novita_backup_key>     # Backup embeddings
+```
+
+### API Endpoints
+- Gemini: `https://generativelanguage.googleapis.com/v1beta`
+- GROQ: `https://api.groq.com/openai/v1` (Mixtral-8x7b)
+- Novita: `https://api.novita.ai/v3`
+
+---
+
+## Bonny's Hardening Directives (Phase 1B)
+
+### Priority 1: Circuit Breaker
+```python
+# Thresholds
+PRIMARY_TRIGGER: 5 failures within 60 seconds
+EMERGENCY_TRIGGER: 3 failures within 10 seconds
+RECOVERY_MODE: 60 requests/min during backoff
+BACKOFF: Exponential 1s → 60s
+```
+
+### Priority 2: Cryptographic Provenance
+```python
+# Every memory node
+{
+    "sha256": hashlib.sha256(content).hexdigest(),
+    "origin": {"source": "cognivault", "timestamp": epoch},
+    "checkpoint": "checkpoint_id"
+}
+```
+
+### Priority 3: Telemetry Strip
+```python
+# NO external telemetry calls
+# Use local event bus instead
+EVENT_BUS = "http://localhost:9090"
+# POST all events locally, never to corporate servers
+```
+
+### Priority 4: Cold-Start Protocol
+```python
+# Generate zero-state checkpoint before first user interaction
+def init_memory():
+    create_checkpoint("zero_state", timestamp=now())
+```
+
+### Priority 5: Memory Decay & Review
+```python
+# Automatic flagging
+if memory.age > 730 days:
+    flag_for_human_review()
+    
+# NEVER auto-delete
+# Option B: Manual deletion after human review
+# 30-day trash recovery window
+```
+
+---
+
+## Development Standards
+
+### Code Quality
+- **Python:** Type hints, docstrings, PEP 8
+- **Testing:** Unit tests for all core functions
+- **Documentation:** README.md, API docs, inline comments
+- **Error Handling:** Try-except with logging, NO silent failures
+
+### Rob's Constraints
+```python
+# CRITICAL: Rob CANNOT code
+# All solutions must be:
+# 1. Click-and-run (zero manual coding)
+# 2. GUI-first when possible
+# 3. Clear error messages with actionable fixes
+# 4. Docker/container for complex dependencies
+```
+
+### Privacy & Security
+- **Local-first processing** (no cloud dependencies)
+- **Zero telemetry** to external services
+- **API keys in environment variables** (never hardcoded)
+- **Private repos only** (GitHub: soundsguyza/aluna-memory)
+
+---
+
+## Directory Structure
+
+```
+aluna-memory/
+├── README.md
+├── requirements.txt
+├── app.py                    # Gradio interface (NO FastAPI)
+├── mem0_core/
+│   ├── memory.py            # Core memory operations
+│   ├── search.py            # Vector search
+│   ├── archive.py           # Cold storage
+│   └── provenance.py        # SHA-256 tracking
+├── openmemory/              # MCP server (subdirectory)
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── src/
+│   │   └── index.ts        # MCP server entry
+│   └── build/
+│       └── index.js        # Compiled MCP server
+├── archive/                 # Cold storage (gzip)
+│   └── {user_id}/
+│       └── 2026-01-memories.json.gz
+├── checkpoints/             # Temporal checkpoints
+│   └── timestamp_epoch.json
+└── tests/
+    └── test_*.py
+```
+
+---
+
+## Integration Points
+
+### CogniVault → Aluna Memory
+```python
+# CogniVault processes files
+cognivault.process(chatgpt_export.zip)
+
+# Extract memories and send to Aluna
+for conversation in cognivault.conversations:
+    aluna_memory.add_memory(
+        user_id="rob",
+        content=conversation.text,
+        metadata={
+            "source": "chatgpt",
+            "date": conversation.date,
+            "participants": conversation.users
+        }
+    )
+```
+
+### Aluna Memory → Open Memory MCP
+```typescript
+// MCP server exposes memory tools to Claude/Cursor
+tools = [
+    "add_memories",
+    "search_memories", 
+    "get_all_memories",
+    "delete_memory",
+    "get_memory_history"
+]
+```
+
+### Open Memory MCP → Claude Desktop
+```json
+// Claude Desktop config
+{
+  "mcpServers": {
+    "openmemory": {
+      "command": "node",
+      "args": ["path/to/openmemory/build/index.js"],
+      "env": {
+        "ALUNA_API_URL": "https://soundsguyza-aluna-memory.hf.space",
+        "HF_TOKEN": "<huggingface_token>"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Deployment
+
+### HuggingFace Space
+- **URL:** https://huggingface.co/spaces/SoundsguyZA/aluna-memory
+- **Visibility:** Private
+- **Runtime:** Gradio app.py
+- **Secrets:** GEMINI_API_KEY, GROQ_API_KEY, NOVITA_API_KEY
+
+### Local Development
+```bash
+# Clone repo
+git clone https://github.com/soundsguyza/aluna-memory
+cd aluna-memory
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set API keys
+export GEMINI_API_KEY="your_key"
+export GROQ_API_KEY="your_key"
+export NOVITA_API_KEY="your_key"
+
+# Run Gradio interface
+python app.py
+
+# Build MCP server
+cd openmemory
+npm install
+npm run build
+```
+
+---
+
+## Common Tasks
+
+### Add Memory
+```python
+from mem0 import Memory
+
+m = Memory()
+m.add("Rob prefers GROQ for fast inference", user_id="rob")
+```
+
+### Search Memory
+```python
+results = m.search("What does Rob prefer?", user_id="rob")
+```
+
+### Archive Old Memories
+```python
+# Automatic via memory.age checks
+if memory.age > 365:
+    archive_to_cold_storage(memory)
+```
+
+### Query via MCP (Claude Desktop)
+```
+User: "What did Rob say about GROQ?"
+Claude → OpenMemory MCP → search_memories("GROQ", user_id="rob")
+```
+
+---
+
+## Troubleshooting
+
+### "Memory not found"
+- Check hot tier first: `memory.search(hot_only=True)`
+- Fallback to cold: `archive.deep_search(query)`
+
+### "API key error"
+- Verify env vars: `echo $GEMINI_API_KEY`
+- Check API key format (no quotes in .env files)
+
+### "MCP server not responding"
+- Check Node.js: `node --version` (requires 20.x)
+- Rebuild: `cd openmemory && npm run build`
+- Test: `node build/index.js`
+
+---
+
+## Testing Checklist
+
+- [ ] Memory CRUD operations
+- [ ] Hot → Cold archival
+- [ ] Cold retrieval performance
+- [ ] SHA-256 provenance tracking
+- [ ] Circuit breaker triggers
+- [ ] MCP server connection
+- [ ] Gradio interface responsive
+- [ ] API key rotation
+
+---
+
+## Branch Strategy
+
+- `main` - Stable mem0 fork
+- `veritas-audit-YYYYMMDD` - Hardening branches (Bonny's directives)
+- `feature/*` - New capabilities
+- `fix/*` - Bug fixes
+
+---
+
+## Contact & Support
+
+**Owner:** Rob "The Sounds Guy" Barenbrug  
+**GitHub:** @soundsguyza  
+**Philosophy:** "Live in truth, never in comfort"  
+**Standard:** 150% - Production ready or nothing
+
+---
+
+## Special Notes for Copilot
+
+1. **Rob cannot code** - Generate complete, runnable solutions
+2. **No corporate telemetry** - All tracking stays local
+3. **Privacy-first** - Never suggest cloud-dependent solutions
+4. **Truth over comfort** - Be honest about limitations
+5. **150% standard** - Production-grade code only, no prototypes
+6. **Bonny's wisdom** - Human review before deletion, 36-month legacy retention
+
+---
+
+**Last Updated:** 2026-01-06  
+**VERITAS Build:** Truth in every keystroke
